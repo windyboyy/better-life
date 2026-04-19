@@ -1,24 +1,43 @@
-//
-//  ContentView.swift
-//  better-life
-//
-//  Created by 张金琛 on 2026/4/19.
-//
-
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var store: HabitStore?
+
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        Group {
+            if let store {
+                TabView {
+                    TodayView(store: store)
+                        .tabItem {
+                            Label("今日", systemImage: "checkmark.circle")
+                        }
+
+                    HistoryView(store: store)
+                        .tabItem {
+                            Label("历史", systemImage: "calendar")
+                        }
+                }
+            } else {
+                ProgressView()
+            }
         }
-        .padding()
+        .onAppear {
+            if store == nil {
+                store = HabitStore(modelContext: modelContext)
+            }
+        }
+        .onChange(of: scenePhase) {
+            if scenePhase == .active {
+                store?.checkDateChange()
+            }
+        }
     }
 }
 
 #Preview {
     ContentView()
+        .modelContainer(for: DailyRecord.self, inMemory: true)
 }

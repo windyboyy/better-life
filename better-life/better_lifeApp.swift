@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct better_lifeApp: App {
@@ -13,5 +14,6 @@ struct better_lifeApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: DailyRecord.self)
     }
 }
