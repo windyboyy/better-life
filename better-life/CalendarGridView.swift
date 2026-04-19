@@ -4,6 +4,7 @@ struct CalendarGridView: View {
     var store: HabitStore
     @State private var displayedYear: Int
     @State private var displayedMonth: Int
+    @State private var selectedDate: String?
 
     init(store: HabitStore) {
         self.store = store
@@ -77,15 +78,32 @@ struct CalendarGridView: View {
                     let record = recordMap[dateString]
                     let isFuture = dateString > todayStr
                     let isToday = dateString == todayStr
+                    let isSelected = dateString == selectedDate
 
                     DayCell(
                         day: String(Int(dateString.suffix(2))!),
                         allDone: record?.allDone ?? false,
                         anyDone: record?.anyDone ?? false,
                         isFuture: isFuture,
-                        isToday: isToday
+                        isToday: isToday,
+                        isSelected: isSelected
                     )
+                    .onTapGesture {
+                        guard !isFuture else { return }
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            selectedDate = selectedDate == dateString ? nil : dateString
+                        }
+                    }
                 }
+            }
+
+            // Selected date detail
+            if let selected = selectedDate, let record = recordMap[selected] {
+                DayDetailPanel(dateString: selected, record: record)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if let selected = selectedDate, recordMap[selected] == nil {
+                DayDetailPanel(dateString: selected, record: nil)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(20)
@@ -98,6 +116,7 @@ struct CalendarGridView: View {
 
     private func goToPreviousMonth() {
         withAnimation(.easeInOut(duration: 0.2)) {
+            selectedDate = nil
             if displayedMonth == 1 {
                 displayedMonth = 12
                 displayedYear -= 1
@@ -110,6 +129,7 @@ struct CalendarGridView: View {
     private func goToNextMonth() {
         guard !isCurrentMonth else { return }
         withAnimation(.easeInOut(duration: 0.2)) {
+            selectedDate = nil
             if displayedMonth == 12 {
                 displayedMonth = 1
                 displayedYear += 1
@@ -126,6 +146,7 @@ private struct DayCell: View {
     let anyDone: Bool
     let isFuture: Bool
     let isToday: Bool
+    let isSelected: Bool
 
     private var textColor: Color {
         if isFuture { return .gray.opacity(0.3) }
@@ -153,6 +174,12 @@ private struct DayCell: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
+            // Selected ring
+            if isSelected {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.blue, lineWidth: 2)
+            }
+
             Text(day)
                 .font(.system(size: 13, weight: isToday ? .bold : .medium, design: .rounded))
                 .foregroundColor(textColor)
@@ -169,5 +196,72 @@ private struct DayCell: View {
             }
         }
         .frame(width: 38, height: 38)
+    }
+}
+
+private struct DayDetailPanel: View {
+    let dateString: String
+    let record: DailyRecord?
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text(DateHelper.displayDate(dateString))
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+
+            HStack(spacing: 20) {
+                DayDetailItem(
+                    icon: "figure.run",
+                    label: "锻炼",
+                    isDone: record?.exerciseDone ?? false,
+                    time: record?.exerciseTime,
+                    color: .green
+                )
+                DayDetailItem(
+                    icon: "book.fill",
+                    label: "读书",
+                    isDone: record?.readingDone ?? false,
+                    time: record?.readingTime,
+                    color: .teal
+                )
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.blue.opacity(0.06))
+        )
+    }
+}
+
+private struct DayDetailItem: View {
+    let icon: String
+    let label: String
+    let isDone: Bool
+    let time: Date?
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(isDone ? color : .gray)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isDone ? .primary : .secondary)
+
+                if isDone, let time {
+                    Text(DateHelper.displayTime(time))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(color)
+                } else {
+                    Text(isDone ? "已完成" : "未完成")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
     }
 }

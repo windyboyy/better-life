@@ -50,4 +50,11 @@ enum DateHelper {
         let weekdayNames = ["", "周日", "周一", "周二", "周三", "周四", "周五", "周六"]
         return "\(month)月\(day)日 \(weekdayNames[weekday])"
     }
+
+    static func displayTime(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "HH:mm"
+        return f.string(from: date)
+    }
 }

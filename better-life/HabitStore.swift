@@ -53,6 +53,7 @@ final class HabitStore {
     func toggleExercise() {
         guard let record = todayRecord else { return }
         record.exerciseDone.toggle()
+        record.exerciseTime = record.exerciseDone ? Date() : nil
         try? modelContext.save()
         fetchAllRecords()
     }
@@ -60,6 +61,7 @@ final class HabitStore {
     func toggleReading() {
         guard let record = todayRecord else { return }
         record.readingDone.toggle()
+        record.readingTime = record.readingDone ? Date() : nil
         try? modelContext.save()
         fetchAllRecords()
     }

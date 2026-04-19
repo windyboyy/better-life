@@ -18,7 +18,7 @@ struct TodayView: View {
     private var timeText: String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "HH:mm"
+        formatter.dateFormat = "HH:mm:ss"
         return formatter.string(from: currentTime)
     }
 
@@ -58,7 +58,7 @@ struct TodayView: View {
             .ignoresSafeArea()
 
             // Habit cards — centered on full screen height
-            VStack(spacing: 20) {
+            VStack(spacing: 24) {
                 HabitCard(
                     icon: "figure.run",
                     title: "锻炼 30 分钟",
@@ -144,25 +144,25 @@ private struct HabitCard: View {
                 action()
             }
         }) {
-            HStack(spacing: 16) {
+            HStack(spacing: 20) {
                 // Icon circle
                 ZStack {
                     Circle()
                         .fill(iconCircleColor)
-                        .frame(width: 52, height: 52)
+                        .frame(width: 68, height: 68)
                         .shadow(color: isDone ? .clear : .black.opacity(0.06), radius: 4, y: 2)
 
                     Image(systemName: icon)
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(.system(size: 30, weight: .semibold))
                         .foregroundStyle(isDone ? .white : activeColor)
                 }
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(title)
-                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .font(.system(size: 22, weight: .semibold, design: .rounded))
 
                     Text(isDone ? "已完成" : subtitle)
-                        .font(.system(size: 13))
+                        .font(.system(size: 15))
                         .foregroundStyle(isDone ? .white.opacity(0.8) : .secondary)
                 }
 
@@ -172,23 +172,23 @@ private struct HabitCard: View {
                 ZStack {
                     Circle()
                         .strokeBorder(isDone ? Color.white.opacity(0.5) : activeColor.opacity(0.4), lineWidth: 2.5)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
 
                     if isDone {
                         Circle()
                             .fill(.white.opacity(0.3))
-                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
 
                         Image(systemName: "checkmark")
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 20, weight: .bold))
                             .foregroundStyle(.white)
                     }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 22)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 32)
             .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(cardBackground)
                     .shadow(
                         color: isDone ? activeColor.opacity(0.3) : .black.opacity(0.06),
@@ -197,7 +197,7 @@ private struct HabitCard: View {
                     )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .strokeBorder(
                         isDone ? Color.clear : activeColor.opacity(0.3),
                         lineWidth: 1.5

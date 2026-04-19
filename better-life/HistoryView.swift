@@ -135,11 +135,13 @@ private struct RecentRecordRow: View {
                 HabitBadge(
                     icon: "figure.run",
                     isDone: record.exerciseDone,
+                    time: record.exerciseTime,
                     color: .orange
                 )
                 HabitBadge(
                     icon: "book.fill",
                     isDone: record.readingDone,
+                    time: record.readingTime,
                     color: .blue
                 )
             }
@@ -151,14 +153,20 @@ private struct RecentRecordRow: View {
 private struct HabitBadge: View {
     let icon: String
     let isDone: Bool
+    let time: Date?
     let color: Color
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold))
-            Image(systemName: isDone ? "checkmark" : "xmark")
-                .font(.system(size: 9, weight: .bold))
+            if isDone, let time {
+                Text(DateHelper.displayTime(time))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+            } else {
+                Image(systemName: isDone ? "checkmark" : "xmark")
+                    .font(.system(size: 9, weight: .bold))
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
