@@ -15,6 +15,11 @@ struct ContentView: View {
                             Label("今日", systemImage: "checkmark.circle")
                         }
 
+                    StudyView()
+                        .tabItem {
+                            Label("学习", systemImage: "timer")
+                        }
+
                     HistoryView(store: store)
                         .tabItem {
                             Label("历史", systemImage: "calendar")
