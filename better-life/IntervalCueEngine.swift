@@ -46,6 +46,18 @@ final class IntervalCueEngine {
     /// Seconds elapsed since the current session started.
     private(set) var elapsedSeconds = 0
 
+    /// Tracks the free-tier daily time allowance (persisted, cross-session).
+    let usage = FreeUsageTracker()
+
+    /// Whether the user has unlocked unlimited time. Set by the view from
+    /// `StoreManager`. When true, usage is never counted or limited.
+    var isPro = false
+
+    /// Set true when a running free session is auto-stopped because the daily
+    /// allowance ran out. The view observes this to present the paywall, then
+    /// resets it via `clearFreeLimitFlag()`.
+    private(set) var reachedFreeLimit = false
+
     /// Interval between cues, in seconds. Changing it mid-session restarts the
     /// cue timer with the new pace (without resetting elapsed counters).
     var interval: TimeInterval = 15 {
@@ -86,7 +98,28 @@ final class IntervalCueEngine {
         isRunning = true
         elapsedTicks = 0
         elapsedSeconds = 0
+        reachedFreeLimit = false
+        usage.refresh()
         UIApplication.shared.isIdleTimerDisabled = true
+        scheduleCueTimer()
+        scheduleSecondTimer()
+    }
+
+    /// Clears the auto-stop flag after the view has reacted to it.
+    func clearFreeLimitFlag() {
+        reachedFreeLimit = false
+    }
+
+    /// Re-aligns the running timers to the current moment. Call this when the app
+    /// returns to the foreground: while suspended in the background the timers are
+    /// frozen and their next fire dates drift, so without this the first cue after
+    /// resuming lands at an irregular interval (e.g. 18s instead of 10s). We don't
+    /// try to compensate for background time — we just restart the cadence cleanly
+    /// from now, preserving the elapsed counters.
+    func resyncIfRunning() {
+        guard isRunning else { return }
+        cueTimer?.invalidate()
+        secondTimer?.invalidate()
         scheduleCueTimer()
         scheduleSecondTimer()
     }
@@ -120,10 +153,22 @@ final class IntervalCueEngine {
 
     private func scheduleSecondTimer() {
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            self?.elapsedSeconds += 1
+            self?.tickSecond()
         }
         RunLoop.main.add(timer, forMode: .common)
         secondTimer = timer
+    }
+
+    /// One-second tick: advances the session clock and, on the free tier, draws
+    /// down the persisted daily allowance — auto-stopping when it runs out.
+    private func tickSecond() {
+        elapsedSeconds += 1
+        guard !isPro else { return }
+        usage.recordOneSecond()
+        if !usage.hasFreeTimeLeft {
+            stop()
+            reachedFreeLimit = true
+        }
     }
 
     private func restartCueTimer() {

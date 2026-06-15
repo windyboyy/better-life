@@ -4,7 +4,10 @@ import SwiftUI
 /// Fires a short cue every N seconds to prompt switching to the next word.
 struct StudyView: View {
     @State private var engine = IntervalCueEngine()
+    @State private var store = StoreManager()
+    @State private var showPaywall = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     private let presets: [TimeInterval] = [10, 15, 20]
 
@@ -33,6 +36,7 @@ struct StudyView: View {
 
             VStack(spacing: 22) {
                 header
+                quotaBanner
                 intervalSection
                 cueToggles
                 soundPicker
@@ -47,7 +51,74 @@ struct StudyView: View {
         .sensoryFeedback(trigger: engine.elapsedTicks) { _, _ in
             engine.vibrationEnabled ? .impact(flexibility: .soft) : nil
         }
+        .task {
+            engine.isPro = store.isPro
+            await store.loadProduct()
+        }
+        .onChange(of: store.isPro) { _, newValue in
+            engine.isPro = newValue
+        }
+        .onChange(of: engine.reachedFreeLimit) { _, hit in
+            if hit {
+                showPaywall = true
+                engine.clearFreeLimitFlag()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Returning to the foreground: re-align the drifted timers so the next
+            // cue is a clean full interval from now instead of a stretched leftover.
+            if phase == .active {
+                engine.resyncIfRunning()
+            }
+        }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView(store: store)
+        }
         .onDisappear { engine.stop() }
+    }
+
+    // MARK: - Free quota banner
+
+    @ViewBuilder
+    private var quotaBanner: some View {
+        if store.isPro {
+            HStack(spacing: 8) {
+                Image(systemName: "infinity")
+                    .font(.system(size: 14, weight: .bold))
+                Text("已解锁 · 无限时长")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(accent)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 16)
+            .background(Capsule().fill(accent.opacity(0.12)))
+        } else {
+            Button {
+                showPaywall = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "hourglass")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("今日免费剩余 \(timeString(engine.usage.remainingSeconds))")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    Spacer()
+                    Text("解锁无限")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 12)
+                        .background(Capsule().fill(accent))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.gray.opacity(0.1))
+                )
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     // MARK: - Header
@@ -220,11 +291,26 @@ struct StudyView: View {
 
     // MARK: - Start / Stop
 
+    private func handleStartStop() {
+        // Stopping is always allowed.
+        if engine.isRunning {
+            withAnimation(.spring(duration: 0.3, bounce: 0.2)) { engine.toggle() }
+            return
+        }
+        // Starting on the free tier requires remaining daily time.
+        if !store.isPro {
+            engine.usage.refresh()
+            guard engine.usage.hasFreeTimeLeft else {
+                showPaywall = true
+                return
+            }
+        }
+        withAnimation(.spring(duration: 0.3, bounce: 0.2)) { engine.toggle() }
+    }
+
     private var startStopButton: some View {
         Button {
-            withAnimation(.spring(duration: 0.3, bounce: 0.2)) {
-                engine.toggle()
-            }
+            handleStartStop()
         } label: {
             Text(engine.isRunning ? "停止" : "开始")
                 .font(.system(size: 22, weight: .bold, design: .rounded))

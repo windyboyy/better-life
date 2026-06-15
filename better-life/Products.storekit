@@ -1,0 +1,41 @@
+{
+  "identifier" : "B5A1C0DE-0001-4A00-9000-BE77ER1IFE001",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "12.00",
+      "familyShareable" : false,
+      "internalID" : "B5A1C0DE-0002-4A00-9000-BE77ER1IFE002",
+      "localizations" : [
+        {
+          "description" : "一次性解锁，永久畅用，不限节拍器时长。",
+          "displayName" : "无限学习时长",
+          "locale" : "zh_CN"
+        }
+      ],
+      "productID" : "gcw.betterlife.unlimited",
+      "referenceName" : "Unlimited",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "0000000000",
+    "_developerTeamID" : "",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 0,
+    "_locale" : "zh_CN",
+    "_storefront" : "CHN",
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}
