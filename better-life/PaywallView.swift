@@ -10,6 +10,13 @@ struct PaywallView: View {
 
     private let accent = Color.indigo
 
+    /// Apple's standard EULA. Used unless you set a custom license agreement in
+    /// App Store Connect (App Information → License Agreement).
+    private static let eulaURL = "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+    /// Hosted privacy policy. App Store review requires a reachable privacy
+    /// policy for apps that offer in-app purchase.
+    private static let privacyURL = "https://github.com/windyboyy/better-life-privacy/blob/main/privacy-policy.md"
+
     var body: some View {
         VStack(spacing: 0) {
             closeBar
@@ -136,10 +143,31 @@ struct PaywallView: View {
             }
             .buttonStyle(.plain)
             .disabled(restoring)
+
+            legal
         }
         .padding(.horizontal, 24)
         .padding(.top, 12)
         .padding(.bottom, 24)
+    }
+
+    /// One-time-purchase disclosure plus the legal links App Store review expects:
+    /// terms of use (EULA) and a privacy policy.
+    private var legal: some View {
+        VStack(spacing: 6) {
+            Text("一次性买断 · 非订阅 · 无自动续费")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                Link("服务条款 (EULA)", destination: URL(string: Self.eulaURL)!)
+                Text("·").foregroundStyle(.secondary)
+                Link("隐私政策", destination: URL(string: Self.privacyURL)!)
+            }
+            .font(.system(size: 11))
+            .tint(.secondary)
+        }
+        .padding(.top, 4)
     }
 
     private var background: Color {
