@@ -27,3 +27,7 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Vocabulary data pipeline — large intermediates (not committed; regenerate via tools/extract_ielts.py)
+tools/data/*.zip
+tools/data/*.db

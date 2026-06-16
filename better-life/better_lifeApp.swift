@@ -14,6 +14,6 @@ struct better_lifeApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(for: DailyRecord.self)
+        .modelContainer(for: [DailyRecord.self, WordProgress.self])
     }
 }
