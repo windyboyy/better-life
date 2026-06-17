@@ -38,7 +38,7 @@ struct TodayView: View {
     private var backgroundTop: Color {
         colorScheme == .dark
             ? Color(red: 0.15, green: 0.15, blue: 0.17)
-            : Color(red: 0.96, green: 0.95, blue: 0.93)
+            : Color(red: 0.95, green: 0.96, blue: 0.98)
     }
 
     private var backgroundBottom: Color {

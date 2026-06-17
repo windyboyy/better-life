@@ -11,6 +11,8 @@ struct StudySessionView: View {
     let title: String
 
     @State private var speech = SpeechPlayer()
+    @State private var dragOffset: CGFloat = 0
+    @State private var undoTrigger = 0   // bumped on each undo to fire haptic feedback
 
     private let accent = VocabView.accent
 
@@ -34,6 +36,7 @@ struct StudySessionView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { store.startSession(scope) }
+        .sensoryFeedback(.impact(weight: .light), trigger: undoTrigger)
     }
 
     // MARK: - Progress
@@ -112,12 +115,56 @@ struct StudySessionView: View {
                 .fill(colorScheme == .dark ? accent.opacity(0.12) : .white)
                 .shadow(color: .black.opacity(0.06), radius: 8, y: 4)
         )
+        .offset(x: dragOffset)
+        .overlay(alignment: .leading) {
+            // Visual hint that fades in proportionally as the user swipes right.
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("撤销")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(.ultraThinMaterial))
+            .padding(.leading, 4)
+            .opacity(store.canUndo ? min(Double(dragOffset) / 60, 1) : 0)
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             if !store.isRevealed {
                 withAnimation(.spring(duration: 0.3, bounce: 0.1)) { store.reveal() }
             }
         }
+        .simultaneousGesture(undoDrag)
+    }
+
+    /// Right-swipe gesture: with damping (~0.6×), triggers undo when the card is
+    /// dragged past ~80 pt. Only active when `canUndo` is true, and only for a
+    /// predominantly horizontal swipe so vertical motion can't trip it.
+    private var undoDrag: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                if store.canUndo,
+                   value.translation.width > 0,
+                   abs(value.translation.width) > abs(value.translation.height) {
+                    dragOffset = value.translation.width * 0.6
+                }
+            }
+            .onEnded { value in
+                if store.canUndo,
+                   value.translation.width > 80,
+                   abs(value.translation.width) > abs(value.translation.height) {
+                    undoTrigger += 1
+                    withAnimation(.spring(duration: 0.3, bounce: 0.1)) {
+                        store.undoLastMark()
+                    }
+                }
+                withAnimation(.spring(duration: 0.3, bounce: 0.2)) {
+                    dragOffset = 0
+                }
+            }
     }
 
     // MARK: - Controls
@@ -183,6 +230,27 @@ struct StudySessionView: View {
             Text("本次共学习 \(store.reviewedThisSession) 个单词")
                 .font(.system(size: 16))
                 .foregroundStyle(.secondary)
+
+            if store.canUndo {
+                Button {
+                    undoTrigger += 1
+                    withAnimation(.spring(duration: 0.3, bounce: 0.1)) {
+                        store.undoLastMark()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.uturn.backward")
+                        Text("撤销上一个标记")
+                    }
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 20)
+                    .background(Capsule().stroke(accent.opacity(0.3)))
+                    .foregroundStyle(accent)
+                }
+                .buttonStyle(.plain)
+            }
+
             Button {
                 withAnimation { store.startSession(scope) }
             } label: {

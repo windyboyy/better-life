@@ -8,13 +8,14 @@ struct VocabView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var store: VocabStore?
+    @State private var showSmartInfo = false
 
     static let accent = Color.indigo
 
     private var backgroundTop: Color {
         colorScheme == .dark
             ? Color(red: 0.15, green: 0.15, blue: 0.17)
-            : Color(red: 0.96, green: 0.95, blue: 0.93)
+            : Color(red: 0.95, green: 0.96, blue: 0.98)
     }
 
     private var backgroundBottom: Color {
@@ -134,12 +135,50 @@ struct VocabView: View {
 
     private func modeButtons(_ store: VocabStore) -> some View {
         VStack(spacing: 12) {
+            // Smart — info button sits right next to the title text.
             NavigationLink {
-                StudySessionView(store: store, scope: .smart, title: "智能复习")
+                StudySessionView(store: store, scope: .smart, title: "智能学习")
             } label: {
-                modeRow(icon: "brain.head.profile", title: "智能复习",
-                        subtitle: "到期复习 + 每天新词", tint: Self.accent)
+                HStack(spacing: 14) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Self.accent)
+                        .frame(width: 44, height: 44)
+                        .background(Circle().fill(Self.accent.opacity(0.15)))
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text("智能学习")
+                                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.primary)
+                            Button {
+                                showSmartInfo = true
+                            } label: {
+                                Image(systemName: "info.circle")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(Self.accent.opacity(0.6))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Text("每日新词 + 间隔巩固")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Self.accent.opacity(0.5))
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.06) : .white)
+                        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+                )
             }
+            .buttonStyle(.plain)
 
             NavigationLink {
                 VocabGroupListView(store: store)
@@ -154,6 +193,9 @@ struct VocabView: View {
                 modeRow(icon: "pencil.and.list.clipboard", title: "复习模式",
                         subtitle: store.reviewCount == 0 ? "暂无标记词" : "生 \(store.rawCount) · 半熟 \(store.halfCount)", tint: .orange)
             }
+        }
+        .sheet(isPresented: $showSmartInfo) {
+            smartInfoSheet(store)
         }
     }
 
@@ -183,6 +225,87 @@ struct VocabView: View {
                 .fill(colorScheme == .dark ? Color.white.opacity(0.06) : .white)
                 .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
         )
+    }
+
+    // MARK: - Smart info sheet
+
+    private func smartInfoSheet(_ store: VocabStore) -> some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    // How it works
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("工作原理", systemImage: "gearshape.2")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+
+                        Text("每天推出固定数量的新词，同时把到期需要巩固的旧词排在队首优先出现。\n\n新词和旧词互不挤占——每天的新词配额始终不变，到期的旧词是额外追加的。")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(4)
+                    }
+
+                    // Spacing rules
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("标记间隔", systemImage: "calendar")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+
+                        VStack(spacing: 8) {
+                            intervalRow(mark: "生", color: .red, description: "掌握不够，第二天再次出现")
+                            intervalRow(mark: "半熟", color: .yellow, description: "有点印象，4 天后出现")
+                            intervalRow(mark: "熟", color: .green, description: "已掌握，不再自动出现")
+                        }
+                    }
+
+                    Divider()
+
+                    // Current stats
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("当前进度", systemImage: "chart.bar")
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        HStack(spacing: 24) {
+                            statItem("新词剩余", "\(store.remainingCount)")
+                            statItem("待复习", "\(store.reviewCount)")
+                            statItem("已学会", "\(store.learnedCount)")
+                        }
+                    }
+                }
+                .padding(24)
+            }
+            .navigationTitle("智能学习")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { showSmartInfo = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func intervalRow(mark: String, color: Color, description: String) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(color)
+                .frame(width: 10, height: 10)
+            Text(mark)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+            Text(description)
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func statItem(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundStyle(Self.accent)
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     static func dateString(_ date: Date) -> String {

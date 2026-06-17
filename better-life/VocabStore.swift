@@ -52,6 +52,23 @@ final class VocabStore {
 
     private var currentDateString = ""
 
+    // MARK: - Undo
+
+    /// Snapshot of a word's progress before a mark was applied, so the mark can
+    /// be precisely reversed.
+    private struct MarkUndo {
+        let word: VocabWord
+        let wasNewlyCreated: Bool       // true → mark() created a new WordProgress row
+        let prevMarkRaw: Int
+        let prevDueDate: String
+        let prevReviewCount: Int
+        let prevLastReviewed: Date?
+        let wasRequeued: Bool           // true → review mode appended word to queue tail
+    }
+
+    private var undoStack: [MarkUndo] = []
+    var canUndo: Bool { !undoStack.isEmpty }
+
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
         self.allWords = VocabLoader.loadBundled()
@@ -81,6 +98,7 @@ final class VocabStore {
         plannedCount = sessionQueue.count
         reviewedThisSession = 0
         isRevealed = false
+        undoStack.removeAll()     // new session → fresh undo history
     }
 
     /// Smart daily queue: due reviews (earliest first) + up to `newPerDay` new words.
@@ -159,24 +177,68 @@ final class VocabStore {
     func mark(_ newMark: WordMark) {
         guard let word = sessionQueue.first else { return }
         let today = currentDateString
+        let wasRequeued = currentScope == .review && newMark != .familiar
 
+        // Snapshot state before mutation so undo can restore it exactly.
         let progress: WordProgress
         if let existing = progressByWord[word.word] {
+            undoStack.append(MarkUndo(
+                word: word, wasNewlyCreated: false,
+                prevMarkRaw: existing.markRaw, prevDueDate: existing.dueDate,
+                prevReviewCount: existing.reviewCount, prevLastReviewed: existing.lastReviewed,
+                wasRequeued: wasRequeued))
             progress = existing
         } else {
             progress = WordProgress(word: word.word, dueDate: today)
             modelContext.insert(progress)
             progressByWord[word.word] = progress
+            undoStack.append(MarkUndo(
+                word: word, wasNewlyCreated: true,
+                prevMarkRaw: WordMark.unmarked.rawValue, prevDueDate: today,
+                prevReviewCount: 0, prevLastReviewed: nil,
+                wasRequeued: wasRequeued))
         }
         progress.setMark(newMark, today: today)
         try? modelContext.save()
 
         sessionQueue.removeFirst()
-        if currentScope == .review && newMark != .familiar {
+        if wasRequeued {
             sessionQueue.append(word)   // keep cycling until it's marked 熟
         }
         reviewedThisSession += 1
         isRevealed = false
+    }
+
+    /// Reverse the most recent mark. Restores SwiftData state, re-inserts the word
+    /// at the front of the session queue, decrements the session counter, and
+    /// reveals the card so the user can re-grade immediately.
+    func undoLastMark() {
+        guard let snapshot = undoStack.popLast() else { return }
+        let word = snapshot.word
+
+        if snapshot.wasNewlyCreated {
+            if let progress = progressByWord[word.word] {
+                modelContext.delete(progress)
+                progressByWord.removeValue(forKey: word.word)
+            }
+        } else {
+            if let progress = progressByWord[word.word] {
+                progress.markRaw = snapshot.prevMarkRaw
+                progress.dueDate = snapshot.prevDueDate
+                progress.reviewCount = snapshot.prevReviewCount
+                progress.lastReviewed = snapshot.prevLastReviewed
+            }
+        }
+        try? modelContext.save()
+
+        // Restore queue: remove the re-queued copy (if any), then put word back at front.
+        if snapshot.wasRequeued, let idx = sessionQueue.lastIndex(of: word) {
+            sessionQueue.remove(at: idx)
+        }
+        sessionQueue.insert(word, at: 0)
+
+        reviewedThisSession = max(0, reviewedThisSession - 1)
+        isRevealed = true
     }
 
     // MARK: - Stats

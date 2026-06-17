@@ -173,7 +173,7 @@ struct PaywallView: View {
     private var background: Color {
         colorScheme == .dark
             ? Color(red: 0.1, green: 0.1, blue: 0.1)
-            : Color(red: 0.96, green: 0.95, blue: 0.93)
+            : Color(red: 0.95, green: 0.96, blue: 0.98)
     }
 }
 
