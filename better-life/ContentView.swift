@@ -20,6 +20,11 @@ struct ContentView: View {
                             Label("学习", systemImage: "timer")
                         }
 
+                    WorkoutTimerView()
+                        .tabItem {
+                            Label("壶铃", systemImage: "dumbbell")
+                        }
+
                     VocabView()
                         .tabItem {
                             Label("背单词", systemImage: "character.book.closed")

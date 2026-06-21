@@ -1,8 +1,8 @@
 import SwiftUI
 import SwiftData
 
-/// 背单词 tab home: overall progress, a finish-time estimate, and entry points
-/// into the three study modes (smart review, study-by-group, 错题本).
+/// 背单词 tab home: study plan selector, progress & finish estimate, and entry
+/// points into the four study modes.
 struct VocabView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
@@ -30,13 +30,14 @@ struct VocabView: View {
 
                 if let store {
                     ScrollView {
-                        VStack(spacing: 18) {
+                        VStack(spacing: 16) {
                             header(store)
+                            planCard(store)
                             estimateCard(store)
                             modeButtons(store)
                         }
                         .padding(.horizontal, 20)
-                        .padding(.top, 40)
+                        .padding(.top, 36)
                         .padding(.bottom, 32)
                     }
                 } else {
@@ -57,40 +58,98 @@ struct VocabView: View {
     // MARK: - Header
 
     private func header(_ store: VocabStore) -> some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             Text("背单词")
                 .font(.system(size: 30, weight: .bold, design: .rounded))
-            Text("雅思核心词 · \(store.totalWords) 词 · \(store.groups.count) 组")
+            Text("雅思核心词 · \(store.totalWords) 词")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+        }
+    }
 
-            let learnedFrac = store.totalWords == 0 ? 0 : Double(store.learnedCount) / Double(store.totalWords)
-            VStack(spacing: 6) {
+    // MARK: - Study plan card
+
+    private func planCard(_ store: VocabStore) -> some View {
+        VStack(spacing: 14) {
+            // Section title
+            HStack {
+                Image(systemName: "target")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Self.accent)
+                Text("当前学习计划")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            // Plan selector — three pills
+            HStack(spacing: 10) {
+                ForEach(StudyPlan.allCases, id: \.self) { plan in
+                    Button {
+                        withAnimation(.spring(duration: 0.3, bounce: 0.1)) {
+                            store.selectedPlan = plan
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: plan.iconName)
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(plan.rawValue)
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            Capsule()
+                                .fill(store.selectedPlan == plan
+                                      ? Self.accent
+                                      : (colorScheme == .dark ? Color.white.opacity(0.08) : Color.gray.opacity(0.1)))
+                        )
+                        .foregroundStyle(store.selectedPlan == plan ? .white : .primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            // Plan progress
+            VStack(spacing: 8) {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.gray.opacity(0.15))
                         Capsule().fill(Self.accent)
-                            .frame(width: geo.size.width * CGFloat(learnedFrac))
+                            .frame(width: geo.size.width * CGFloat(store.planFraction))
                     }
                 }
                 .frame(height: 8)
+
                 HStack {
-                    Text("已学会 \(store.learnedCount)")
+                    Text("\(store.planTotalWords) 词")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
                     Spacer()
-                    Text("已开始 \(store.startedCount) / \(store.totalWords)")
+                    Text("已学会 \(store.planLearnedCount)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Self.accent)
+                    Spacer()
+                    Text("\(Int((store.planFraction * 100).rounded()))%")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Self.accent)
                 }
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
             }
-            .padding(.top, 4)
+            .padding(.top, 2)
         }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(colorScheme == .dark ? Self.accent.opacity(0.1) : .white)
+                .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+        )
     }
 
     // MARK: - Finish estimate
 
     private func estimateCard(_ store: VocabStore) -> some View {
-        let days = store.daysToFinish(perDay: store.newPerDay)
-        let date = store.finishDate(perDay: store.newPerDay)
+        let days = store.planDaysToFinish(perDay: store.newPerDay)
+        let date = store.planFinishDate(perDay: store.newPerDay)
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: "calendar.badge.clock")
@@ -107,12 +166,12 @@ struct VocabView: View {
                     .font(.system(size: 15))
             }
 
-            if store.remainingCount == 0 {
-                Text("全部 \(store.totalWords) 词都已开始学习 🎉")
+            if store.planRemainingCount == 0 {
+                Text("当前计划「\(store.selectedPlan.rawValue)」的词已全部开始 🎉")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
             } else {
-                Text("还剩 \(store.remainingCount) 个新词，约 \(days) 天过完一遍")
+                Text("还剩 \(store.planRemainingCount) 个新词，约 \(days) 天过完一遍")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                 if let date {
@@ -135,7 +194,7 @@ struct VocabView: View {
 
     private func modeButtons(_ store: VocabStore) -> some View {
         VStack(spacing: 12) {
-            // Smart — info button sits right next to the title text.
+            // 1. Smart learning — follows the selected plan
             NavigationLink {
                 StudySessionView(store: store, scope: .smart, title: "智能学习")
             } label: {
@@ -151,6 +210,13 @@ struct VocabView: View {
                             Text("智能学习")
                                 .font(.system(size: 18, weight: .semibold, design: .rounded))
                                 .foregroundStyle(.primary)
+                            // Show plan badge
+                            Text(store.selectedPlan.rawValue)
+                                .font(.system(size: 11, weight: .semibold))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Self.accent.opacity(0.15)))
+                                .foregroundStyle(Self.accent)
                             Button {
                                 showSmartInfo = true
                             } label: {
@@ -160,7 +226,7 @@ struct VocabView: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        Text("每日新词 + 间隔巩固")
+                        Text("每日新词 + 间隔巩固 · 限定当前计划")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                     }
@@ -180,18 +246,28 @@ struct VocabView: View {
             }
             .buttonStyle(.plain)
 
+            // 2. Browse word library by difficulty
             NavigationLink {
-                VocabGroupListView(store: store)
+                VocabBrowseView(store: store)
             } label: {
-                modeRow(icon: "square.grid.2x2", title: "按分组学习",
-                        subtitle: "\(store.groups.count) 组 · 每组 \(VocabLoader.groupSize) 词", tint: .teal)
+                modeRow(icon: "books.vertical.fill", title: "浏览词库",
+                        subtitle: "核心 · 常用 · 进阶 · 生僻", tint: .teal)
             }
 
+            // 3. Review mode
             NavigationLink {
                 VocabReviewView(store: store)
             } label: {
                 modeRow(icon: "pencil.and.list.clipboard", title: "复习模式",
                         subtitle: store.reviewCount == 0 ? "暂无标记词" : "生 \(store.rawCount) · 半熟 \(store.halfCount)", tint: .orange)
+            }
+
+            // 4. Flying petals — timed auto-review
+            NavigationLink {
+                FlyingPetalsView(store: store)
+            } label: {
+                modeRow(icon: "wind", title: "摘叶飞花",
+                        subtitle: store.reviewCount == 0 ? "暂无标记词" : "生词10秒 · 半熟词5秒 · 自动切词", tint: .mint)
             }
         }
         .sheet(isPresented: $showSmartInfo) {
@@ -238,7 +314,7 @@ struct VocabView: View {
                         Label("工作原理", systemImage: "gearshape.2")
                             .font(.system(size: 18, weight: .semibold, design: .rounded))
 
-                        Text("每天推出固定数量的新词，同时把到期需要巩固的旧词排在队首优先出现。\n\n新词和旧词互不挤占——每天的新词配额始终不变，到期的旧词是额外追加的。")
+                        Text("每天推出固定数量的新词，同时把到期需要巩固的旧词排在队首优先出现。\n\n新词和旧词互不挤占——每天的新词配额始终不变，到期的旧词是额外追加的。\n\n当前限定在「\(store.selectedPlan.rawValue)」计划内，只学习该难度范围的词。")
                             .font(.system(size: 15))
                             .foregroundStyle(.secondary)
                             .lineSpacing(4)
@@ -258,14 +334,14 @@ struct VocabView: View {
 
                     Divider()
 
-                    // Current stats
+                    // Current stats — plan scoped
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("当前进度", systemImage: "chart.bar")
+                        Label("「\(store.selectedPlan.rawValue)」计划进度", systemImage: "chart.bar")
                             .font(.system(size: 18, weight: .semibold, design: .rounded))
                         HStack(spacing: 24) {
-                            statItem("新词剩余", "\(store.remainingCount)")
+                            statItem("新词剩余", "\(store.planRemainingCount)")
                             statItem("待复习", "\(store.reviewCount)")
-                            statItem("已学会", "\(store.learnedCount)")
+                            statItem("已学会", "\(store.planLearnedCount)")
                         }
                     }
                 }

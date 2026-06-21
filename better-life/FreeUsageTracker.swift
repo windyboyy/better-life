@@ -14,7 +14,7 @@ import Observation
 @Observable
 final class FreeUsageTracker {
     /// Daily free allowance, in seconds (10 minutes).
-    static let dailyLimitSeconds = 10 * 60
+    static let dailyLimitSeconds = 60 * 60
 
     private static let dateKey = "freeUsageDate"
     private static let secondsKey = "freeUsageSeconds"

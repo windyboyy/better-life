@@ -4,9 +4,10 @@ import Observation
 
 /// What pool of words the current study session draws from.
 enum SessionScope: Equatable {
-    case smart           // due reviews across all words + a daily cap of new words
-    case group(Int)      // only words in the given group (id)
-    case review          // only words the user has marked 生 / 半熟
+    case smart                        // due reviews + daily cap of new words (plan-scoped)
+    case group(Int)                   // only words in the given group (id)
+    case difficulty(VocabDifficulty)  // all words of a given difficulty tier
+    case review                       // only words the user has marked 生 / 半熟
 }
 
 /// Aggregate progress for a slice of the word list.
@@ -16,6 +17,41 @@ struct GroupStats {
     var total: Int
 
     var fraction: Double { total == 0 ? 0 : Double(learned) / Double(total) }
+}
+
+// MARK: - Study Plan
+
+/// User-chosen study plan — which difficulty tier to focus on.
+/// Persisted in UserDefaults so it survives app restarts.
+enum StudyPlan: String, CaseIterable {
+    case core = "核心"
+    case common = "常用"
+    case advanced = "进阶"
+
+    var difficulty: VocabDifficulty {
+        switch self {
+        case .core: return .core
+        case .common: return .common
+        case .advanced: return .advanced
+        }
+    }
+
+    var color: String {
+        switch self {
+        case .core: return "core"
+        case .common: return "common"
+        case .advanced: return "advanced"
+        }
+    }
+
+    /// SF Symbol for the plan badge.
+    var iconName: String {
+        switch self {
+        case .core: return "flame.fill"
+        case .common: return "star.fill"
+        case .advanced: return "sparkles"
+        }
+    }
 }
 
 /// Drives the flashcard study session: loads the bundled word list, tracks
@@ -31,8 +67,27 @@ final class VocabStore {
     let groups: [VocabGroup]
     private let wordIndex: [String: VocabWord]
 
+    /// Words pre-filtered by difficulty tier, for plan-based queries.
+    private let wordsByDifficulty: [VocabDifficulty: [VocabWord]]
+
     /// How many never-seen words to introduce per session.
     var newPerDay = 20
+
+    // MARK: - Study plan
+
+    /// The user's active study plan. Persisted to UserDefaults.
+    var selectedPlan: StudyPlan {
+        didSet {
+            UserDefaults.standard.set(selectedPlan.rawValue, forKey: "selectedPlan")
+            // When plan changes and smart session was active, rebuild it.
+            if case .smart = currentScope { startSession(.smart) }
+        }
+    }
+
+    /// All words that belong to the currently selected plan, in importance order.
+    var planWords: [VocabWord] {
+        wordsByDifficulty[selectedPlan.difficulty] ?? []
+    }
 
     /// Cached per-word progress, refreshed from SwiftData. Drives stats without
     /// hitting the store on every view render.
@@ -74,6 +129,11 @@ final class VocabStore {
         self.allWords = VocabLoader.loadBundled()
         self.groups = VocabLoader.makeGroups(from: allWords)
         self.wordIndex = Dictionary(uniqueKeysWithValues: allWords.map { ($0.word, $0) })
+        // Pre-index by difficulty for fast plan filtering.
+        self.wordsByDifficulty = Dictionary(grouping: allWords) { $0.difficulty }
+        // Restore persisted plan, default to 核心.
+        let raw = UserDefaults.standard.string(forKey: "selectedPlan") ?? StudyPlan.core.rawValue
+        self.selectedPlan = StudyPlan(rawValue: raw) ?? .core
         reloadProgress()
         startSession(.smart)
     }
@@ -91,6 +151,8 @@ final class VocabStore {
             sessionQueue = smartQueue()
         case .group(let id):
             sessionQueue = groupQueue(id)
+        case .difficulty(let difficulty):
+            sessionQueue = difficultyQueue(difficulty)
         case .review:
             sessionQueue = reviewQueue()
         }
@@ -102,16 +164,23 @@ final class VocabStore {
     }
 
     /// Smart daily queue: due reviews (earliest first) + up to `newPerDay` new words.
+    /// Scoped to the user's currently selected study plan.
     private func smartQueue() -> [VocabWord] {
         let today = currentDateString
         let progress = progressByWord
+        let planWordSet = Set(planWords.map { $0.word })
         let index = wordIndex
+
         let due = progress.values
-            .filter { $0.needsReview && $0.dueDate <= today }
+            .filter { prog in
+                prog.needsReview
+                    && prog.dueDate <= today
+                    && planWordSet.contains(prog.word)
+            }
             .sorted { $0.dueDate < $1.dueDate }
             .compactMap { index[$0.word] }
 
-        let new = allWords.lazy
+        let new = planWords.lazy
             .filter { progress[$0.word] == nil }
             .prefix(newPerDay)
             .map { $0 }
@@ -128,6 +197,24 @@ final class VocabStore {
         var due: [VocabWord] = []
         var new: [VocabWord] = []
         for word in group.words {
+            if let p = progressByWord[word.word] {
+                if p.needsReview && p.dueDate <= today { due.append(word) }
+            } else if new.count < newPerDay {
+                new.append(word)
+            }
+        }
+        return due + new
+    }
+
+    /// Difficulty-tier queue: due reviews in the tier + up to `newPerDay` unstudied
+    /// words from the same tier, in importance order.
+    private func difficultyQueue(_ difficulty: VocabDifficulty) -> [VocabWord] {
+        let today = currentDateString
+        let words = wordsByDifficulty[difficulty] ?? []
+
+        var due: [VocabWord] = []
+        var new: [VocabWord] = []
+        for word in words {
             if let p = progressByWord[word.word] {
                 if p.needsReview && p.dueDate <= today { due.append(word) }
             } else if new.count < newPerDay {
@@ -255,6 +342,31 @@ final class VocabStore {
     /// Words not yet introduced.
     var remainingCount: Int { max(0, totalWords - startedCount) }
 
+    // MARK: Plan-specific stats
+
+    /// Total words in the current plan.
+    var planTotalWords: Int { planWords.count }
+
+    /// Words in the current plan that have been started.
+    var planStartedCount: Int {
+        let set = Set(planWords.map { $0.word })
+        return progressByWord.values.filter { set.contains($0.word) }.count
+    }
+
+    /// Words in the current plan marked 熟.
+    var planLearnedCount: Int {
+        let set = Set(planWords.map { $0.word })
+        return progressByWord.values.filter { $0.isLearned && set.contains($0.word) }.count
+    }
+
+    /// Unstarted words remaining in the current plan.
+    var planRemainingCount: Int { max(0, planTotalWords - planStartedCount) }
+
+    /// Plan progress fraction.
+    var planFraction: Double {
+        planTotalWords == 0 ? 0 : Double(planLearnedCount) / Double(planTotalWords)
+    }
+
     /// Stats for one group, computed from the cached progress snapshot.
     func stats(for group: VocabGroup) -> GroupStats {
         var started = 0, learned = 0
@@ -265,6 +377,19 @@ final class VocabStore {
             }
         }
         return GroupStats(started: started, learned: learned, total: group.words.count)
+    }
+
+    /// Stats for a difficulty tier, used in the browse view.
+    func statsForDifficulty(_ difficulty: VocabDifficulty) -> GroupStats {
+        let words = wordsByDifficulty[difficulty] ?? []
+        var started = 0, learned = 0
+        for word in words {
+            if let p = progressByWord[word.word] {
+                started += 1
+                if p.isLearned { learned += 1 }
+            }
+        }
+        return GroupStats(started: started, learned: learned, total: words.count)
     }
 
     /// Words currently in the review pool (生 / 半熟), 生 first.
@@ -294,6 +419,19 @@ final class VocabStore {
     /// Calendar date by which all words would be introduced at `perDay` a day.
     func finishDate(perDay: Int) -> Date? {
         let days = daysToFinish(perDay: perDay)
+        guard days > 0 else { return nil }
+        return Calendar.current.date(byAdding: .day, value: days, to: Date())
+    }
+
+    /// Plan-aware: days to finish introducing remaining words in the current plan.
+    func planDaysToFinish(perDay: Int) -> Int {
+        guard perDay > 0, planRemainingCount > 0 else { return 0 }
+        return Int((Double(planRemainingCount) / Double(perDay)).rounded(.up))
+    }
+
+    /// Plan-aware: calendar date for finishing the current plan.
+    func planFinishDate(perDay: Int) -> Date? {
+        let days = planDaysToFinish(perDay: perDay)
         guard days > 0 else { return nil }
         return Calendar.current.date(byAdding: .day, value: days, to: Date())
     }

@@ -237,14 +237,36 @@ private struct MottoView: View {
         let separatorColor: Color = allDone ? .green : dimColor
         let readingColor: Color = readingDone ? .green : dimColor
 
-        (Text(prefix).foregroundColor(prefixColor)
-        + Text(exercisePart).foregroundColor(exerciseColor)
-        + Text(separator).foregroundColor(separatorColor)
-        + Text(readingPart).foregroundColor(readingColor))
+        Text(mottoAttr(
+            prefix: prefix, prefixColor: prefixColor,
+            exercise: exercisePart, exerciseColor: exerciseColor,
+            separator: separator, separatorColor: separatorColor,
+            reading: readingPart, readingColor: readingColor
+        ))
             .font(.system(size: 13, weight: .regular, design: .rounded))
             .multilineTextAlignment(.center)
             .animation(.easeInOut(duration: 0.3), value: exerciseDone)
             .animation(.easeInOut(duration: 0.3), value: readingDone)
+    }
+
+    private func mottoAttr(
+        prefix: String, prefixColor: Color,
+        exercise: String, exerciseColor: Color,
+        separator: String, separatorColor: Color,
+        reading: String, readingColor: Color
+    ) -> AttributedString {
+        var attr = AttributedString(prefix)
+        attr.foregroundColor = prefixColor
+        var ex = AttributedString(exercise)
+        ex.foregroundColor = exerciseColor
+        attr.append(ex)
+        var sep = AttributedString(separator)
+        sep.foregroundColor = separatorColor
+        attr.append(sep)
+        var rd = AttributedString(reading)
+        rd.foregroundColor = readingColor
+        attr.append(rd)
+        return attr
     }
 }
 

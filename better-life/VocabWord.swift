@@ -34,6 +34,16 @@ extension VocabWord {
         let b = bnc == 0 ? Int.max : bnc
         return (-collins, f, b)
     }
+
+    /// Word difficulty bucket derived from Collins star rating.
+    var difficulty: VocabDifficulty {
+        switch collins {
+        case 4...: return .core
+        case 2..<4: return .common
+        case 1: return .advanced
+        default: return .rare
+        }
+    }
 }
 
 /// A fixed-size, importance-ordered slice of the word list — the unit the user
