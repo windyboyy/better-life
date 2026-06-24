@@ -164,6 +164,37 @@ final class WorkoutTimerEngine {
     private var timer: Timer?
     private let synthesizer = AVSpeechSynthesizer()
 
+    /// Receives `AVSpeechSynthesizer` finish/cancel callbacks so we can lift audio
+    /// ducking — restoring other apps' (e.g. NetEase / QQ Music) volume — once a
+    /// spoken cue ends, rather than keeping it ducked for the whole workout.
+    @ObservationIgnored private let speechCoordinator = SpeechCoordinator()
+
+    /// Pending debounced un-duck (see `scheduleDuckRestore()`).
+    @ObservationIgnored private var pendingDuckRestore: DispatchWorkItem?
+
+    /// Serial queue for all `AVAudioSession` activate/deactivate calls. Those are
+    /// synchronous and can block — iOS warns that running them on the main thread
+    /// causes UI unresponsiveness, and it's what made the countdown timer stall
+    /// and skip a number at phase changes. A *serial* queue keeps activate/
+    /// deactivate strictly ordered so the session never ends up in the wrong state.
+    @ObservationIgnored private let audioSessionQueue =
+        DispatchQueue(label: "com.betterlife.workout.audioSession")
+
+    /// How long to wait after a spoken cue finishes before restoring other apps'
+    /// volume. Must exceed the ~1s gap between consecutive countdown numbers so
+    /// the whole "3, 2, 1, Go" sequence stays a single ducking episode.
+    private let duckRestoreDelay: TimeInterval = 1.3
+
+    /// Monotonic timestamp of the last *accepted* tick, used to drop bunched
+    /// ticks (see `tick()`).
+    @ObservationIgnored private var lastTickUptime: Double?
+
+    /// Minimum spacing between accepted ticks. A repeating `Timer` whose run loop
+    /// stalled (e.g. while audio starts at a phase change) can fire twice in quick
+    /// succession to catch up; anything closer than this is a catch-up artefact,
+    /// not a real second, and is dropped so the on-screen number never skips.
+    private let minTickInterval: TimeInterval = 0.5
+
     /// Controls the system Music app's playback queue, so changes persist with
     /// whatever the user already queued in the Music app.
     private let musicPlayer = MPMusicPlayerController.systemMusicPlayer
@@ -186,6 +217,20 @@ final class WorkoutTimerEngine {
             voiceLanguage = lang
         }
         configureAudioSession()
+        speechCoordinator.onSpeechFinished = { [weak self] in
+            self?.scheduleDuckRestore()
+        }
+        synthesizer.delegate = speechCoordinator
+        preloadCues()
+    }
+
+    /// Registers every cue's `SystemSoundID` up front. The first use of a sound
+    /// otherwise loads its file from disk synchronously, which can briefly stall
+    /// the run loop mid-countdown — doing it at init keeps phase changes smooth.
+    private func preloadCues() {
+        for cue in [Cue.workStart, .restStart, .tick, .finish] {
+            _ = systemSoundID(for: cue)
+        }
     }
 
     /// Configures the shared audio session for background playback so that the
@@ -208,14 +253,61 @@ final class WorkoutTimerEngine {
         )
     }
 
+    /// Activates the shared audio session off the main thread (see
+    /// `audioSessionQueue`). Re-applies `.duckOthers` whenever we start speaking.
+    private func activateSessionAsync() {
+        audioSessionQueue.async {
+            try? AVAudioSession.sharedInstance().setActive(true)
+        }
+    }
+
+    /// Deactivates the shared audio session off the main thread, notifying other
+    /// apps so their volume (the ducked music) is restored.
+    private func deactivateSessionAsync() {
+        audioSessionQueue.async {
+            try? AVAudioSession.sharedInstance().setActive(
+                false, options: .notifyOthersOnDeactivation
+            )
+        }
+    }
+
     /// Releases the audio session so the system can reclaim resources when the
     /// workout is fully stopped (reset or finished). We intentionally do NOT
     /// deactivate on pause — the session stays alive so the user can resume
     /// quickly, including from the locked screen.
     private func deactivateAudioSession() {
-        try? AVAudioSession.sharedInstance().setActive(
-            false, options: .notifyOthersOnDeactivation
-        )
+        cancelDuckRestore()
+        deactivateSessionAsync()
+    }
+
+    /// Schedules lifting of the `.duckOthers` attenuation a short moment after a
+    /// spoken cue finishes. Ducking persists for as long as our session is active,
+    /// so the only way to restore other apps' volume is to deactivate the session
+    /// (with `.notifyOthersOnDeactivation`).
+    ///
+    /// We debounce rather than restore immediately: the countdown speaks "3", "2",
+    /// "1" (then "Go") as separate utterances ~1s apart, and restoring between
+    /// each would make background music dip-and-pop three times in a row. By
+    /// waiting `duckRestoreDelay` — longer than the gap between consecutive
+    /// numbers — and cancelling the pending restore whenever the next number
+    /// starts (`cancelDuckRestore()` in `speak()`), the whole countdown becomes a
+    /// single ducking episode: music dips once when it begins and rises once after
+    /// it ends. Driven by `SpeechCoordinator` when the synthesizer goes idle.
+    private func scheduleDuckRestore() {
+        pendingDuckRestore?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingDuckRestore = nil
+            self?.deactivateSessionAsync()
+        }
+        pendingDuckRestore = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duckRestoreDelay, execute: work)
+    }
+
+    /// Cancels a pending un-duck so an imminent spoken number keeps the current
+    /// ducking episode alive instead of letting it bounce.
+    private func cancelDuckRestore() {
+        pendingDuckRestore?.cancel()
+        pendingDuckRestore = nil
     }
 
     // MARK: - Derived UI helpers
@@ -309,6 +401,9 @@ final class WorkoutTimerEngine {
     // MARK: - Timer loop
 
     private func scheduleTimer() {
+        // Fresh cadence: the next tick should be a full second away, so forget the
+        // previous tick's timestamp (don't let the bunching guard drop it).
+        lastTickUptime = nil
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             self?.tick()
         }
@@ -317,6 +412,14 @@ final class WorkoutTimerEngine {
     }
 
     private func tick() {
+        // Drop catch-up ticks: if the run loop stalled (e.g. while audio spins up
+        // at a phase change) the repeating timer can fire twice almost at once to
+        // realign. Ignoring the bunched second keeps the visible countdown from
+        // skipping a number (e.g. "14" flashing past in a blink at rest start).
+        let now = ProcessInfo.processInfo.systemUptime
+        if let last = lastTickUptime, now - last < minTickInterval { return }
+        lastTickUptime = now
+
         // Draw down the free allowance first; auto-stop if it runs out.
         if !isPro {
             usage.recordOneSecond()
@@ -393,8 +496,14 @@ final class WorkoutTimerEngine {
         timer = nil
         UIApplication.shared.isIdleTimerDisabled = false
         playCue(.finish)
-        if voiceEnabled { speak(voiceLanguage.finishPhrase(sets: sets)) }
-        deactivateAudioSession()
+        if voiceEnabled {
+            // Speak the closing phrase, then let `SpeechCoordinator` release the
+            // session once it finishes — deactivating now would cut the phrase off
+            // and leave other audio ducked.
+            speak(voiceLanguage.finishPhrase(sets: sets))
+        } else {
+            deactivateAudioSession()
+        }
         syncMusic()
     }
 
@@ -438,7 +547,8 @@ final class WorkoutTimerEngine {
     /// volume — the user never hears it, but it primes the audio session + voice.
     private func preWarmSynthesizer() {
         guard voiceEnabled else { return }
-        try? AVAudioSession.sharedInstance().setActive(true)
+        cancelDuckRestore()
+        activateSessionAsync()
         synthesizer.stopSpeaking(at: .immediate)
         let utterance = AVSpeechUtterance(string: " ")
         utterance.voice = AVSpeechSynthesisVoice(language: voiceLanguage.speechLocale)
@@ -448,7 +558,8 @@ final class WorkoutTimerEngine {
     }
 
     private func speak(_ text: String) {
-        try? AVAudioSession.sharedInstance().setActive(true)
+        cancelDuckRestore()
+        activateSessionAsync()
         synthesizer.stopSpeaking(at: .immediate)
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: voiceLanguage.speechLocale)
@@ -470,6 +581,35 @@ final class WorkoutTimerEngine {
         timer?.invalidate()
         for id in registeredIDs.values {
             AudioServicesDisposeSystemSoundID(id)
+        }
+    }
+}
+
+/// Bridges `AVSpeechSynthesizer`'s delegate callbacks back to the engine. It fires
+/// `onSpeechFinished` only when the synthesizer has fully stopped (no further
+/// queued utterances), so the engine can lift audio ducking exactly once per
+/// spoken cue rather than on every utterance boundary.
+private final class SpeechCoordinator: NSObject, AVSpeechSynthesizerDelegate {
+    var onSpeechFinished: (() -> Void)?
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                           didFinish utterance: AVSpeechUtterance) {
+        notifyIfIdle(synthesizer)
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                           didCancel utterance: AVSpeechUtterance) {
+        notifyIfIdle(synthesizer)
+    }
+
+    /// `isSpeaking` can still report the just-finished utterance synchronously
+    /// inside the callback, and a new `speak()` may be about to enqueue another
+    /// utterance. Re-checking on the next main-queue turn settles both races, so
+    /// we only un-duck when speech has genuinely stopped.
+    private func notifyIfIdle(_ synthesizer: AVSpeechSynthesizer) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !synthesizer.isSpeaking else { return }
+            self.onSpeechFinished?()
         }
     }
 }
